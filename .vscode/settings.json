@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "delay.h": "c",
+        "s7.h": "c",
+        "e1.h": "c",
+        "i2c.h": "c",
+        "s5.h": "c",
+        "u1.h": "c"
+    }
+}
