@@ -1,6 +1,6 @@
 #include <stdio.h>
-#include <string.h> // 用于strcmp
-#include <math.h>   // 用于sqrtf
+#include <string.h>
+#include <math.h>
 
 #include "delay.h"
 #include "u1.h"
@@ -19,7 +19,6 @@
 #define TAP_THRESHOLD_G 1.5f // 轻拍检测阈值
 #define PIR_ABSENCE_THRESHOLD_SEC 30
 #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
-
 
 // --- NFC卡片唯一ID (UID) ---
 // 假设已提前读取并记录了每张卡的UID，这里用作示例
@@ -274,12 +273,14 @@ void perform_continuous_checks(void)
 void start_focus_mode(void)
 {
     unsigned int current_illuminance = s2_illuminance_value_get(s2_illuminance_info);
-    if (current_illuminance < LOW_LIGHT_THRESHOLD) {
+    if (current_illuminance < LOW_LIGHT_THRESHOLD)
+    {
         e1_tube_str_set(e1_tube_info, "LItE Lo");
         // 闪烁黄色灯光以示提醒
-        for (int i=0; i<3; i++) {
+        for (int i = 0; i < 3; i++)
+        {
             e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄
-            delay_ms(300); // 注意：这里的短延时是可接受的，因为它只在开始时执行一次
+            delay_ms(300);                            // 注意：这里的短延时是可接受的，因为它只在开始时执行一次
             e1_led_rgb_set(e1_led_info, 0, 0, 0);
             delay_ms(300);
         }

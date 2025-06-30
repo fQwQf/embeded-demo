@@ -1624,7 +1624,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\stdlib.h)(0x60252374)
 I (..\Peripherals\inc\gd32f4xx_exmc.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_ipa.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_tli.h)(0x63E0A758)
-F (..\BSP\src\u1.c)(0x666C03B8)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\u1.o --omf_browse .\objects\u1.crf --depend .\objects\u1.d)
+F (..\BSP\src\u1.c)(0x6861FB21)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\u1.o --omf_browse .\objects\u1.crf --depend .\objects\u1.d)
 I (..\BSP\inc\u1.h)(0x66629B0E)
 I (..\CMSIS\gd32f4xx\inc\gd32f4xx.h)(0x63E0A758)
 I (..\CMSIS\core\inc\core_cm4.h)(0x64C9D444)
@@ -1664,11 +1664,9 @@ I (C:\Keil_v5\ARM\ARMCC\include\stdlib.h)(0x60252374)
 I (..\Peripherals\inc\gd32f4xx_exmc.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_ipa.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_tli.h)(0x63E0A758)
-F (..\Application\src\main.c)(0x685E52F1)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\main.o --omf_browse .\objects\main.crf --depend .\objects\main.d)
+F (..\Application\src\main.c)(0x686201A4)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\main.o --omf_browse .\objects\main.crf --depend .\objects\main.d)
 I (C:\Keil_v5\ARM\ARMCC\include\stdio.h)(0x60252374)
-I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
-I (C:\Keil_v5\ARM\ARMCC\include\math.h)(0x60252378)
-I (..\BSP\inc\delay.h)(0x65B88A40)
+I (C:\Keil_v5\ARM\ARMCC\include\stdbool.h)(0x6025237C)
 I (..\BSP\inc\u1.h)(0x66629B0E)
 I (..\CMSIS\gd32f4xx\inc\gd32f4xx.h)(0x63E0A758)
 I (..\CMSIS\core\inc\core_cm4.h)(0x64C9D444)
@@ -1709,9 +1707,5 @@ I (..\Peripherals\inc\gd32f4xx_exmc.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_ipa.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_tli.h)(0x63E0A758)
 I (..\BSP\inc\e1.h)(0x65B3649E)
+I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 I (..\BSP\inc\i2c.h)(0x65B896D2)
-I (..\BSP\inc\e2.h)(0x65B3649E)
-I (..\BSP\inc\s1.h)(0x65B70FFE)
-I (..\BSP\inc\s2.h)(0x65B88B20)
-I (..\BSP\inc\s5.h)(0x65EFCE5E)
-I (..\BSP\inc\s7.h)(0x65B723B2)

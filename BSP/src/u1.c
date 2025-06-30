@@ -147,14 +147,14 @@ void u1_timer0_init(void)
 	\参数[输出] 无
 	\返回       无
 */
-void TIMER0_UP_TIMER9_IRQHandler(void)
-{
+//void TIMER0_UP_TIMER9_IRQHandler(void)
+//{
 	/* 确认是Timer0产生的中断 */
-	if(timer_interrupt_flag_get(TIMER0, TIMER_INT_FLAG_UP))
-	{
+//	if(timer_interrupt_flag_get(TIMER0, TIMER_INT_FLAG_UP))
+//	{
 		/* LED状态翻转 */
-		u1_led_toggle();
+//		u1_led_toggle();
 		/* 清除Timer0中断标志位 */
-		timer_interrupt_flag_clear(TIMER0, TIMER_INT_FLAG_UP);
-	}
-}
+//		timer_interrupt_flag_clear(TIMER0, TIMER_INT_FLAG_UP);
+//	}
+//}
