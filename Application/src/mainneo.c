@@ -18,7 +18,6 @@
 #define FAN_SPEED_MEDIUM 40
 #define FAN_SPEED_HIGH 60
 #define TAP_THRESHOLD_G 1.5f
-#define PIR_ABSENCE_THRESHOLD_SEC 30
 #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
 
 // --- NFC卡片唯一ID (UID) ---
@@ -53,7 +52,6 @@ int long_rest_duration_sec = 15 * 60;
 int completed_sessions = 0;
 int pomodoro_cycle_count = 0;
 int fan_level = 1;
-volatile int pir_absence_counter = 0;
 char last_key_pressed = 0;
 
 // ================== 函数声明 ==================
@@ -164,31 +162,22 @@ void handle_inputs(void)
             {
                 if (currentState == STATE_NFC_READ)
                 {
-                    unsigned char card_id[4];
-                    unsigned char card_type[2];
                     char display_buf[10];
 
-                    // 在读取模式下持续寻卡
-                    if (s5_nfc_request(s5_nfc_info, 0x26, card_type) == MI_OK)
-                    {
-                        if (s5_nfc_anticoll(s5_nfc_info, card_id) == MI_OK)
-                        {
-                            // 成功读取ID，开始分段显示
+                    // 成功读取ID，开始分段显示
 
-                            // 显示前2个字节
-                            sprintf(display_buf, "%02x%02x", card_id[0], card_id[1]);
-                            e1_tube_str_set(e1_tube_info, display_buf);
-                            delay_ms(2000); // 停留2秒
+                    // 显示前2个字节
+                    sprintf(display_buf, "%02x%02x", card_id[0], card_id[1]);
+                    e1_tube_str_set(e1_tube_info, display_buf);
+                    delay_ms(2000); // 停留2秒
 
-                            // 显示后2个字节
-                            sprintf(display_buf, "%02x%02x", card_id[2], card_id[3]);
-                            e1_tube_str_set(e1_tube_info, display_buf);
-                            delay_ms(2000); // 停留2秒
+                    // 显示后2个字节
+                    sprintf(display_buf, "%02x%02x", card_id[2], card_id[3]);
+                    e1_tube_str_set(e1_tube_info, display_buf);
+                    delay_ms(2000); // 停留2秒
 
-                            // 显示完毕，返回空闲状态
-                            currentState = STATE_IDLE;
-                        }
-                    }
+                    // 显示完毕，返回空闲状态
+                    currentState = STATE_IDLE;
                 }
                 else
                 {
@@ -275,16 +264,9 @@ void perform_continuous_checks(void)
         // PIR检测
         if (s7_ir_status_get(s7_ir_info) == 0)
         {
-            pir_absence_counter++;
-            if (pir_absence_counter * LOOP_DELAY_MS / 1000 >= PIR_ABSENCE_THRESHOLD_SEC)
-            {
-                currentState = STATE_PAUSED;
-                e2_fan_speed_set(e2_fan_info, 0);
-            }
-        }
-        else
-        {
-            pir_absence_counter = 0;
+
+            currentState = STATE_PAUSED;
+            e2_fan_speed_set(e2_fan_info, 0);
         }
     }
 
@@ -401,9 +383,7 @@ void handle_keypad_input(char key)
         break;
     case STATE_REST:
     case STATE_LONG_REST:
-        if (key == '*')
-            start_focus_mode(); // `*`键在休息时也作为跳过键
-        if (key == '0')
+        if (key == '*' || key == '0')
             start_focus_mode(); // 跳过休息
         else if (key == '1')
             remaining_seconds += 5 * 60;
@@ -414,8 +394,6 @@ void handle_keypad_input(char key)
         if (key == '*')
         {
             currentState = STATE_FOCUS; // 恢复
-            if (s7_ir_status_get(s7_ir_info) == 1)
-                pir_absence_counter = 0; // 如果人已在，重置PIR
         }
         break;
     case STATE_IDLE:
