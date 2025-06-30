@@ -1,6 +1,8 @@
 .\objects\main.o: ..\Application\src\main.c
 .\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
-.\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdbool.h
+.\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+.\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
+.\objects\main.o: ..\BSP\inc\delay.h
 .\objects\main.o: ..\BSP\inc\u1.h
 .\objects\main.o: ..\CMSIS\gd32f4xx\inc\gd32f4xx.h
 .\objects\main.o: ..\CMSIS\core\inc\core_cm4.h
@@ -42,5 +44,9 @@
 .\objects\main.o: ..\Peripherals\inc\gd32f4xx_ipa.h
 .\objects\main.o: ..\Peripherals\inc\gd32f4xx_tli.h
 .\objects\main.o: ..\BSP\inc\e1.h
-.\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 .\objects\main.o: ..\BSP\inc\i2c.h
+.\objects\main.o: ..\BSP\inc\e2.h
+.\objects\main.o: ..\BSP\inc\s1.h
+.\objects\main.o: ..\BSP\inc\s2.h
+.\objects\main.o: ..\BSP\inc\s5.h
+.\objects\main.o: ..\BSP\inc\s7.h

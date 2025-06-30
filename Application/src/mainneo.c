@@ -29,6 +29,7 @@ const unsigned char DATA_CARD_UID[4] = {0x9C, 0xAD, 0xBE, 0xCF};
 typedef enum
 {
     STATE_IDLE,
+    STATE_LOADING_MODE,
     STATE_FOCUS,
     STATE_REST,
     STATE_LONG_REST,
@@ -218,9 +219,8 @@ void load_task_mode(const unsigned char *card_uid)
         return;
     }
 
-    delay_ms(1500);           // 显示模式后稍作停留
-    pomodoro_cycle_count = 0; // 重置循环计数
-    start_focus_mode();
+    currentState = STATE_LOADING_MODE;
+    ui_timer_seconds = 2;
 }
 
 void update_state_machine(void)
@@ -290,6 +290,13 @@ void update_state_machine(void)
             remaining_seconds = focus_duration_sec;
             e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
             fan_level = 1;
+        }
+        break;
+    case STATE_LOADING_MODE:
+        if (ui_timer_seconds <= 0)
+        {
+            pomodoro_cycle_count = 0;
+            start_focus_mode(); // 延时结束，切换到专注模式
         }
         break;
     default:
