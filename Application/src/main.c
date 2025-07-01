@@ -21,9 +21,9 @@
 #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
 
 // --- NFC卡片唯一ID (UID) ---
-const unsigned char STUDY_CARD_UID[4] = {0xFE, 0x1F, 0x7F, 0xC2};
-const unsigned char DEEP_WORK_CARD_UID[4] = {0x5E, 0x6F, 0x7A, 0x8B};
-const unsigned char DATA_CARD_UID[4] = {0x9C, 0xAD, 0xBE, 0xCF};
+unsigned char study_card_uid[4] = {0xFE, 0x1F, 0x7F, 0xC2};
+unsigned char deep_work_card_uid[4] = {0x5E, 0x6F, 0x7A, 0x8B};
+unsigned char data_card_uid[4] = {0x9C, 0xAD, 0xBE, 0xCF};
 
 // ================== 系统状态枚举 ==================
 typedef enum
@@ -35,14 +35,20 @@ typedef enum
     STATE_LONG_REST,
     STATE_PAUSED,
     STATE_SHOW_STATS,
-    STATE_TEMP_DISPLAY, 
+    STATE_TEMP_DISPLAY,
     STATE_NFC_READ,
     STATE_NFC_DISPLAY_PART1, // 用于显示NFC ID的前半部分
     STATE_NFC_DISPLAY_PART2, // 用于显示NFC ID的后半部分
-    STATE_LOW_LIGHT_WARNING  // 用于低光照闪烁警告
+    STATE_LOW_LIGHT_WARNING, // 用于低光照闪烁警告
+    STATE_BIND_MENU_PROMPT,  // 提示用户选择要绑定的卡类型 (1: Study, 2: Deep, 3: Data)
+    STATE_BINDING_STUDY,     // 等待绑定“学习卡”
+    STATE_BINDING_DEEP_WORK, // 等待绑定“深度工作卡”
+    STATE_BINDING_DATA,      // 等待绑定“数据卡”
+    STATE_BIND_SUCCESS,      // 绑定成功提示
+    STATE_BIND_FAILED,       // 绑定失败/超时提示
 } SystemState;
 
-// --- 状态与计时器 ---
+// 状态与计时器
 volatile SystemState currentState = STATE_IDLE;
 volatile int remaining_seconds = 0;
 volatile bool g_second_has_passed = false;
@@ -51,17 +57,24 @@ volatile int flash_count = 0;        // 用于控制闪烁次数
 volatile int tap_cooldown_ticks = 0; // 用于敲击检测的冷却计时器
 volatile SystemState previousState = STATE_IDLE;
 
-// --- 定时器配置 ---
+// 定时器配置
 int focus_duration_sec = 25 * 60;
 int rest_duration_sec = 5 * 60;
 int long_rest_duration_sec = 15 * 60;
 
-// --- 统计与逻辑 ---
+// 统计与逻辑
 int completed_sessions = 0;
 int pomodoro_cycle_count = 0;
 int fan_level = 1;
 char last_key_pressed = 0;
 unsigned char last_read_card_id[4] = {0};
+
+// 用于滚动显示的全局变量
+char g_scroll_text[40];          // 存储需要滚动的完整文本
+int g_scroll_index = 0;          // 当前滚动显示的位置
+bool g_is_scrolling = false;     // 滚动是否激活
+volatile int g_scroll_timer = 0; // 用于控制滚动速度的计时器 (在ISR中递减)
+#define SCROLL_SPEED_TICKS 3     // 每隔3个主循环周期滚动一次 (约300ms)
 
 // ================== 函数声明 ==================
 void hardware_init(void);
@@ -73,8 +86,10 @@ void start_focus_mode(void);
 void start_rest_mode(void);
 void update_display(void);
 void handle_keypad_input(char key);
+void start_scrolling(const char *text);
+void stop_scrolling();
 
-// ================== <<< 重写的硬件定时器代码 >>> ==================
+// ================== 重写的硬件定时器代码 ==================
 void hz_timer_init(void)
 {
     timer_parameter_struct timer_init_struct;
@@ -167,14 +182,38 @@ void handle_inputs(void)
 
     // --- NFC输入处理 ---
     // 只有在特定状态下才检测NFC
-    if (currentState == STATE_IDLE || currentState == STATE_SHOW_STATS || currentState == STATE_NFC_READ)
+    if (currentState == STATE_IDLE ||
+        currentState == STATE_SHOW_STATS ||
+        currentState == STATE_NFC_READ ||
+        currentState == STATE_BINDING_STUDY ||
+        currentState == STATE_BINDING_DEEP_WORK ||
+        currentState == STATE_BINDING_DATA)
     {
         unsigned char card_type[2];
         if (s5_nfc_request(s5_nfc_info, 0x26, card_type) == MI_OK)
         {
             if (s5_nfc_anticoll(s5_nfc_info, last_read_card_id) == MI_OK)
             {
-                if (currentState == STATE_NFC_READ)
+                if (currentState == STATE_BINDING_STUDY)
+                {
+                    memcpy(study_card_uid, last_read_card_id, 4);
+                    currentState = STATE_BIND_SUCCESS;
+                    ui_timer_seconds = 2; // 显示成功2秒
+                }
+                else if (currentState == STATE_BINDING_DEEP_WORK)
+                {
+                    memcpy(deep_work_card_uid, last_read_card_id, 4);
+                    currentState = STATE_BIND_SUCCESS;
+                    ui_timer_seconds = 2;
+                }
+                else if (currentState == STATE_BINDING_DATA)
+                {
+                    memcpy(data_card_uid, last_read_card_id, 4);
+                    currentState = STATE_BIND_SUCCESS;
+                    ui_timer_seconds = 2;
+                }
+                // 现有的NFC读取/显示逻辑
+                else if (currentState == STATE_NFC_READ)
                 {
                     // 显示前两位
                     char display_buf[10];
@@ -191,34 +230,41 @@ void handle_inputs(void)
                 }
             }
         }
+        else if (currentState >= STATE_BINDING_STUDY && currentState <= STATE_BINDING_DATA && ui_timer_seconds <= 0)
+        {
+            // 如果处于绑定状态但长时间没有检测到卡，则超时失败
+            currentState = STATE_BIND_FAILED;
+            ui_timer_seconds = 2;
+        }
     }
 }
 
 void load_task_mode(const unsigned char *card_uid)
 {
-    if (memcmp(card_uid, STUDY_CARD_UID, 4) == 0)
+    if (memcmp(card_uid, study_card_uid, 4) == 0)
     {
         focus_duration_sec = 25 * 60;
         rest_duration_sec = 5 * 60;
         long_rest_duration_sec = 15 * 60;
         e1_tube_str_set(e1_tube_info, "StdY");
     }
-    else if (memcmp(card_uid, DEEP_WORK_CARD_UID, 4) == 0)
+    else if (memcmp(card_uid, deep_work_card_uid, 4) == 0)
     {
         focus_duration_sec = 50 * 60;
         rest_duration_sec = 10 * 60;
         long_rest_duration_sec = 10 * 60; // 深度工作模式无长休息
         e1_tube_str_set(e1_tube_info, "dEEP");
     }
-    else if (memcmp(card_uid, DATA_CARD_UID, 4) == 0)
+    else if (memcmp(card_uid, data_card_uid, 4) == 0)
     {
         currentState = STATE_SHOW_STATS;
         return; // 不改变计时器设置，仅切换状态
     }
     else
     {
-        e1_tube_str_set(e1_tube_info, "Err"); // 未知卡
-        delay_ms(1000);
+        e1_tube_str_set(e1_tube_info, "Err");   // 未知卡
+        ui_timer_seconds = 1;                   // 短暂显示错误
+        currentState = STATE_NFC_DISPLAY_PART2; // 借用STATE_NFC_DISPLAY_PART2，显示完错误后返回IDLE
         return;
     }
 
@@ -300,6 +346,20 @@ void update_state_machine(void)
         {
             pomodoro_cycle_count = 0;
             start_focus_mode(); // 延时结束，切换到专注模式
+        }
+        break;
+    case STATE_BIND_SUCCESS:
+        if (ui_timer_seconds <= 0)
+        {
+            e1_led_rgb_set(e1_led_info, 0, 100, 0); // 绿色表示成功
+            currentState = STATE_BIND_MENU_PROMPT;  // 成功后返回绑定菜单，等待选择下一个
+        }
+        break;
+    case STATE_BIND_FAILED:
+        if (ui_timer_seconds <= 0)
+        {
+            e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色表示失败
+            currentState = STATE_BIND_MENU_PROMPT;  // 失败后返回绑定菜单
         }
         break;
     default:
@@ -434,9 +494,33 @@ void update_display(void)
         sprintf(buf, "donE%02d", completed_sessions);
         e1_tube_str_set(e1_tube_info, buf);
         break;
-    case STATE_NFC_READ:                          // <-- 新增显示逻辑
-        e1_led_rgb_set(e1_led_info, 0, 100, 100); // 青色 (Cyan)
+    case STATE_NFC_READ:
+        e1_led_rgb_set(e1_led_info, 0, 100, 100); // 青
         // 数码管的显示在主循环中直接处理了，这里只负责灯光
+        break;
+    case STATE_BIND_MENU_PROMPT:
+        e1_led_rgb_set(e1_led_info, 100, 50, 0); // 橙色
+        e1_tube_str_set(e1_tube_info, "bnd?");   // 提示选择绑定类型
+        break;
+    case STATE_BINDING_STUDY:
+        e1_led_rgb_set(e1_led_info, 100, 50, 0);
+        e1_tube_str_set(e1_tube_info, "bnd1"); // 等待刷学习卡
+        break;
+    case STATE_BINDING_DEEP_WORK:
+        e1_led_rgb_set(e1_led_info, 100, 50, 0);
+        e1_tube_str_set(e1_tube_info, "bnd2"); // 等待刷深度工作卡
+        break;
+    case STATE_BINDING_DATA:
+        e1_led_rgb_set(e1_led_info, 100, 50, 0);
+        e1_tube_str_set(e1_tube_info, "bnd3"); // 等待刷数据卡
+        break;
+    case STATE_BIND_SUCCESS:
+        e1_led_rgb_set(e1_led_info, 0, 100, 0); // 绿色
+        e1_tube_str_set(e1_tube_info, " OK ");
+        break;
+    case STATE_BIND_FAILED:
+        e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色
+        e1_tube_str_set(e1_tube_info, "Fail");
         break;
     }
 }
@@ -463,11 +547,11 @@ void handle_keypad_input(char key)
             if (fan_level == 3)
                 e2_fan_speed_set(e2_fan_info, FAN_SPEED_HIGH);
 
-            previousState = STATE_FOCUS;          // 保存当前状态
-            currentState = STATE_TEMP_DISPLAY;    // 切换到临时显示状态
-            ui_timer_seconds = 2;                 // 设置显示时长为2秒
-            sprintf(buf, "FAn %d", fan_level);    // 准备要显示的内容
-            e1_tube_str_set(e1_tube_info, buf);   // 立即更新数码管
+            previousState = STATE_FOCUS;        // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY;  // 切换到临时显示状态
+            ui_timer_seconds = 2;               // 设置显示时长为2秒
+            sprintf(buf, "FAn %d", fan_level);  // 准备要显示的内容
+            e1_tube_str_set(e1_tube_info, buf); // 立即更新数码管
         }
         break;
     case STATE_REST:
@@ -488,15 +572,55 @@ void handle_keypad_input(char key)
     case STATE_IDLE:
     case STATE_SHOW_STATS:
         if (key == '#')
-        { // 从统计或空闲返回
+        { // 从统计返回
             currentState = STATE_IDLE;
             completed_sessions = 0; // 可选：按#重置统计
         }
         else if (key == '5')
-        { // <-- 新增逻辑
+        {
             currentState = STATE_NFC_READ;
             e1_tube_str_set(e1_tube_info, "rEAd"); // 立即更新显示，提供即时反馈
-            delay_ms(500);                         // 避免按键抖动
+            ui_timer_seconds = 1;                  // 短暂显示
+        }
+        else if (key == '0')
+        { // 按0进入绑定模式
+            currentState = STATE_BIND_MENU_PROMPT;
+            e1_tube_str_set(e1_tube_info, "bnd?");
+            ui_timer_seconds = 5; // 如果5秒内没选择，自动退出
+        }
+        break;
+    case STATE_BIND_MENU_PROMPT:
+        if (key == '1')
+        { // 绑定学习卡
+            currentState = STATE_BINDING_STUDY;
+            e1_tube_str_set(e1_tube_info, "bnd1");
+            ui_timer_seconds = 10; // 等待刷卡10秒超时
+        }
+        else if (key == '2')
+        { // 绑定深度工作卡
+            currentState = STATE_BINDING_DEEP_WORK;
+            e1_tube_str_set(e1_tube_info, "bnd2");
+            ui_timer_seconds = 10;
+        }
+        else if (key == '3')
+        { // 绑定数据卡
+            currentState = STATE_BINDING_DATA;
+            e1_tube_str_set(e1_tube_info, "bnd3");
+            ui_timer_seconds = 10;
+        }
+        else if (key == '#')
+        { // 退出绑定菜单
+            currentState = STATE_IDLE;
+        }
+        break;
+
+    case STATE_BINDING_STUDY:
+    case STATE_BINDING_DEEP_WORK:
+    case STATE_BINDING_DATA:
+        if (key == '#')
+        { // 强制退出当前绑定操作，返回绑定菜单
+            currentState = STATE_BIND_MENU_PROMPT;
+            ui_timer_seconds = 0; // 清除超时计时器
         }
         break;
 
@@ -504,4 +628,3 @@ void handle_keypad_input(char key)
         break;
     }
 }
-
