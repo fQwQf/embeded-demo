@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdbool.h>
 
 #include "delay.h"
 #include "u1.h"
@@ -16,12 +17,10 @@
 #define FAN_SPEED_LOW 20
 #define FAN_SPEED_MEDIUM 40
 #define FAN_SPEED_HIGH 60
-#define TAP_THRESHOLD_G 1.5f // 轻拍检测阈值
-#define PIR_ABSENCE_THRESHOLD_SEC 30
+#define TAP_THRESHOLD_G 1.5f
 #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
 
 // --- NFC卡片唯一ID (UID) ---
-// 假设已提前读取并记录了每张卡的UID，这里用作示例
 const unsigned char STUDY_CARD_UID[4] = {0xFE, 0x1F, 0x7F, 0xC2};
 const unsigned char DEEP_WORK_CARD_UID[4] = {0x5E, 0x6F, 0x7A, 0x8B};
 const unsigned char DATA_CARD_UID[4] = {0x9C, 0xAD, 0xBE, 0xCF};
@@ -30,19 +29,27 @@ const unsigned char DATA_CARD_UID[4] = {0x9C, 0xAD, 0xBE, 0xCF};
 typedef enum
 {
     STATE_IDLE,
+    STATE_LOADING_MODE,
     STATE_FOCUS,
     STATE_REST,
     STATE_LONG_REST,
     STATE_PAUSED,
-    STATE_SNOOZE,     // 贪睡状态
-    STATE_SHOW_STATS, // 显示统计数据
-    STATE_NFC_READ
+    STATE_SHOW_STATS,
+    STATE_TEMP_DISPLAY, 
+    STATE_NFC_READ,
+    STATE_NFC_DISPLAY_PART1, // 用于显示NFC ID的前半部分
+    STATE_NFC_DISPLAY_PART2, // 用于显示NFC ID的后半部分
+    STATE_LOW_LIGHT_WARNING  // 用于低光照闪烁警告
 } SystemState;
 
 // --- 状态与计时器 ---
 volatile SystemState currentState = STATE_IDLE;
 volatile int remaining_seconds = 0;
-volatile int loop_tick_counter = 0;
+volatile bool g_second_has_passed = false;
+volatile int ui_timer_seconds = 0;   // 新增的UI计时器
+volatile int flash_count = 0;        // 用于控制闪烁次数
+volatile int tap_cooldown_ticks = 0; // 用于敲击检测的冷却计时器
+volatile SystemState previousState = STATE_IDLE;
 
 // --- 定时器配置 ---
 int focus_duration_sec = 25 * 60;
@@ -52,9 +59,9 @@ int long_rest_duration_sec = 15 * 60;
 // --- 统计与逻辑 ---
 int completed_sessions = 0;
 int pomodoro_cycle_count = 0;
-int fan_level = 1; // 1:low, 2:medium, 3:high
-int pir_absence_counter = 0;
+int fan_level = 1;
 char last_key_pressed = 0;
+unsigned char last_read_card_id[4] = {0};
 
 // ================== 函数声明 ==================
 void hardware_init(void);
@@ -67,26 +74,72 @@ void start_rest_mode(void);
 void update_display(void);
 void handle_keypad_input(char key);
 
+// ================== <<< 重写的硬件定时器代码 >>> ==================
+void hz_timer_init(void)
+{
+    timer_parameter_struct timer_init_struct;
+    rcu_periph_clock_enable(RCU_TIMER0);
+    timer_deinit(TIMER0);
+    timer_init_struct.prescaler = 20000;
+    timer_init_struct.alignedmode = TIMER_COUNTER_EDGE;
+    timer_init_struct.counterdirection = TIMER_COUNTER_UP;
+    timer_init_struct.clockdivision = TIMER_CKDIV_DIV1;
+    timer_init_struct.period = 10000; // 200Mhz / 20k / 10k = 1 Hz
+    timer_init_struct.repetitioncounter = 0;
+    timer_init(TIMER0, &timer_init_struct);
+    timer_counter_value_config(TIMER0, 0);
+    timer_enable(TIMER0);
+    timer_interrupt_enable(TIMER0, TIMER_INT_UP);
+    nvic_irq_enable(TIMER0_UP_TIMER9_IRQn, 1, 1);
+}
+
+// <<< 优化后的中断服务程序 (ISR) >>>
+void TIMER0_UP_TIMER9_IRQHandler(void)
+{
+    if (timer_interrupt_flag_get(TIMER0, TIMER_INT_FLAG_UP) != RESET)
+    {
+        // 1. 递减主计时器
+        if (remaining_seconds > 0)
+        {
+            remaining_seconds--;
+        }
+
+        // 新增：管理UI计时器
+        if (ui_timer_seconds > 0)
+        {
+            ui_timer_seconds--;
+        }
+
+        // 2. 设置标志位，通知主循环“一秒钟过去了”
+        g_second_has_passed = true;
+
+        timer_interrupt_flag_clear(TIMER0, TIMER_INT_FLAG_UP);
+    }
+}
+
 // ================== 主函数 ==================
 int main(void)
 {
     hardware_init();
+    hz_timer_init();
 
     while (1)
     {
+        // 持续执行的任务
+        handle_inputs();
+        perform_continuous_checks();
 
-        handle_inputs();             // 1. 处理所有输入
-        update_state_machine();      // 2. 更新状态机
-        perform_continuous_checks(); // 3. 执行持续检测
-        update_display();            // 4. 更新所有输出
-
-        delay_ms(LOOP_DELAY_MS);
-        loop_tick_counter++;
+        // 每秒执行的任务
+        if (g_second_has_passed)
+        {
+            g_second_has_passed = false;
+            update_state_machine();
+            update_display();
+        }
     }
 }
 
 // ================== 辅助函数实现 ==================
-
 void hardware_init(void)
 {
     e1_led_info = e1_led_init();
@@ -116,43 +169,25 @@ void handle_inputs(void)
     // 只有在特定状态下才检测NFC
     if (currentState == STATE_IDLE || currentState == STATE_SHOW_STATS || currentState == STATE_NFC_READ)
     {
-        unsigned char card_id[4];
         unsigned char card_type[2];
         if (s5_nfc_request(s5_nfc_info, 0x26, card_type) == MI_OK)
         {
-            if (s5_nfc_anticoll(s5_nfc_info, card_id) == MI_OK)
+            if (s5_nfc_anticoll(s5_nfc_info, last_read_card_id) == MI_OK)
             {
                 if (currentState == STATE_NFC_READ)
                 {
-                    unsigned char card_id[4];
-                    unsigned char card_type[2];
+                    // 显示前两位
                     char display_buf[10];
+                    sprintf(display_buf, "%02x%02x", last_read_card_id[0], last_read_card_id[1]);
+                    e1_tube_str_set(e1_tube_info, display_buf);
 
-                    // 在读取模式下持续寻卡
-                    if (s5_nfc_request(s5_nfc_info, 0x26, card_type) == MI_OK)
-                    {
-                        if (s5_nfc_anticoll(s5_nfc_info, card_id) == MI_OK)
-                        {
-                            // 成功读取ID，开始分段显示
-
-                            // 显示前2个字节
-                            sprintf(display_buf, "%02x%02x", card_id[0], card_id[1]);
-                            e1_tube_str_set(e1_tube_info, display_buf);
-                            delay_ms(2000); // 停留2秒
-
-                            // 显示后2个字节
-                            sprintf(display_buf, "%02x%02x", card_id[2], card_id[3]);
-                            e1_tube_str_set(e1_tube_info, display_buf);
-                            delay_ms(2000); // 停留2秒
-
-                            // 显示完毕，返回空闲状态
-                            currentState = STATE_IDLE;
-                        }
-                    }
+                    // 2进入第一部分显示状态，并设置计时器
+                    currentState = STATE_NFC_DISPLAY_PART1;
+                    ui_timer_seconds = 2; // 显示2秒
                 }
                 else
                 {
-                    load_task_mode(card_id);
+                    load_task_mode(last_read_card_id);
                 }
             }
         }
@@ -187,50 +222,88 @@ void load_task_mode(const unsigned char *card_uid)
         return;
     }
 
-    delay_ms(1500);           // 显示模式后稍作停留
-    pomodoro_cycle_count = 0; // 重置循环计数
-    start_focus_mode();
+    currentState = STATE_LOADING_MODE;
+    ui_timer_seconds = 2;
 }
 
 void update_state_machine(void)
 {
-    if (loop_tick_counter >= (1000 / LOOP_DELAY_MS))
-    { // 每秒执行一次
-        loop_tick_counter = 0;
-        if (remaining_seconds > 0)
-            remaining_seconds--;
-
-        switch (currentState)
+    switch (currentState)
+    {
+    case STATE_FOCUS:
+        if (remaining_seconds <= 0)
         {
-        case STATE_FOCUS:
-            if (remaining_seconds <= 0)
+            completed_sessions++;
+            pomodoro_cycle_count++;
+            if (pomodoro_cycle_count >= 4)
             {
-                completed_sessions++;
-                pomodoro_cycle_count++;
-                if (pomodoro_cycle_count >= 4)
-                {
-                    pomodoro_cycle_count = 0;
-                    remaining_seconds = long_rest_duration_sec;
-                    currentState = STATE_LONG_REST;
-                }
-                else
-                {
-                    start_rest_mode();
-                }
+                pomodoro_cycle_count = 0;
+                remaining_seconds = long_rest_duration_sec;
+                currentState = STATE_LONG_REST;
             }
-            break;
-        case STATE_REST:
-        case STATE_LONG_REST:
-            if (remaining_seconds <= 0)
-                start_focus_mode();
-            break;
-        case STATE_SNOOZE:
-            if (remaining_seconds <= 0)
-                start_rest_mode(); // 贪睡结束，开始正式休息
-            break;
-        default:
-            break;
+            else
+            {
+                start_rest_mode();
+            }
         }
+        break;
+    case STATE_REST:
+    case STATE_LONG_REST:
+        if (remaining_seconds <= 0)
+            start_focus_mode();
+        break;
+    case STATE_NFC_DISPLAY_PART1:
+        if (ui_timer_seconds <= 0)
+        {
+            char display_buf[10];
+            sprintf(display_buf, "%02x%02x", last_read_card_id[2], last_read_card_id[3]);
+            e1_tube_str_set(e1_tube_info, display_buf);
+
+            // 进入第二部分显示状态
+            currentState = STATE_NFC_DISPLAY_PART2;
+            ui_timer_seconds = 2; // 再显示2秒
+        }
+        break;
+    case STATE_NFC_DISPLAY_PART2:
+        if (ui_timer_seconds <= 0)
+        {
+            // 全部显示完毕，返回空闲状态
+            currentState = STATE_IDLE;
+        }
+        break;
+    case STATE_LOW_LIGHT_WARNING:
+        if (ui_timer_seconds <= 0 && flash_count > 0)
+        {
+            if (flash_count % 2 == 0)
+            {
+                e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄灯亮
+            }
+            else
+            {
+                e1_led_rgb_set(e1_led_info, 0, 0, 0); // 黄灯灭
+            }
+            flash_count--;
+            ui_timer_seconds = 1; // 重置1秒计时器
+        }
+
+        if (flash_count <= 0)
+        {
+            // 闪烁结束，正式进入专注模式
+            currentState = STATE_FOCUS;
+            remaining_seconds = focus_duration_sec;
+            e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
+            fan_level = 1;
+        }
+        break;
+    case STATE_LOADING_MODE:
+        if (ui_timer_seconds <= 0)
+        {
+            pomodoro_cycle_count = 0;
+            start_focus_mode(); // 延时结束，切换到专注模式
+        }
+        break;
+    default:
+        break;
     }
 }
 
@@ -242,30 +315,61 @@ void perform_continuous_checks(void)
         // PIR检测
         if (s7_ir_status_get(s7_ir_info) == 0)
         {
-            pir_absence_counter++;
-            if (pir_absence_counter * LOOP_DELAY_MS / 1000 >= PIR_ABSENCE_THRESHOLD_SEC)
-            {
-                currentState = STATE_PAUSED;
-                e2_fan_speed_set(e2_fan_info, 0);
-            }
+
+            currentState = STATE_PAUSED;
+            e2_fan_speed_set(e2_fan_info, 0);
         }
-        else
+    }
+    else if (currentState == STATE_PAUSED)
+    {
+        if (s7_ir_status_get(s7_ir_info) == 1)
         {
-            pir_absence_counter = 0;
+            currentState = STATE_FOCUS; // 恢复专注
+            // 恢复风扇
+            if (fan_level == 1)
+                e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
+            if (fan_level == 2)
+                e2_fan_speed_set(e2_fan_info, FAN_SPEED_MEDIUM);
+            if (fan_level == 3)
+                e2_fan_speed_set(e2_fan_info, FAN_SPEED_HIGH);
         }
     }
 
-    // --- IMU 轻拍检测 ---
-    if (currentState == STATE_FOCUS && remaining_seconds <= 0)
+    // 敲击检测
+    if (currentState == STATE_FOCUS || currentState == STATE_PAUSED)
     {
-        // 轻拍检测
-        s2_imu_t imu = s2_imu_value_get(s2_imu_info);
-        float magnitude = sqrtf(imu.acc_x * imu.acc_x + imu.acc_y * imu.acc_y + imu.acc_z * imu.acc_z);
-        if (magnitude > TAP_THRESHOLD_G)
+        // 1. 更新冷却计时器
+        if (tap_cooldown_ticks > 0)
         {
-            currentState = STATE_SNOOZE;
-            remaining_seconds = 5 * 60; // 贪睡5分钟
-            delay_ms(1000);             // 防抖
+            tap_cooldown_ticks--;
+        }
+
+        // 2. 读取IMU数据
+        s2_imu_t imu_value = s2_imu_value_get(s2_imu_info);
+
+        // 3. 检测Z轴上的加速度冲击 (敲击)
+        if (fabsf(imu_value.acc_z) > TAP_THRESHOLD_G && tap_cooldown_ticks == 0)
+        {
+            // 4. 设置冷却时间，防止连续触发 (例如1秒)
+            tap_cooldown_ticks = 10; // 假设主循环延时100ms，10次即1秒
+
+            // 5. 根据当前状态执行操作
+            if (currentState == STATE_FOCUS)
+            {
+                currentState = STATE_PAUSED;
+                e2_fan_speed_set(e2_fan_info, 0); // 暂停时关闭风扇
+            }
+            else if (currentState == STATE_PAUSED)
+            {
+                currentState = STATE_FOCUS;
+                // 恢复风扇，具体速度取决于fan_level
+                if (fan_level == 1)
+                    e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
+                if (fan_level == 2)
+                    e2_fan_speed_set(e2_fan_info, FAN_SPEED_MEDIUM);
+                if (fan_level == 3)
+                    e2_fan_speed_set(e2_fan_info, FAN_SPEED_HIGH);
+            }
         }
     }
 }
@@ -276,20 +380,17 @@ void start_focus_mode(void)
     if (current_illuminance < LOW_LIGHT_THRESHOLD)
     {
         e1_tube_str_set(e1_tube_info, "LItE Lo");
-        // 闪烁黄色灯光以示提醒
-        for (int i = 0; i < 3; i++)
-        {
-            e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄
-            delay_ms(300);                            // 注意：这里的短延时是可接受的，因为它只在开始时执行一次
-            e1_led_rgb_set(e1_led_info, 0, 0, 0);
-            delay_ms(300);
-        }
+        currentState = STATE_LOW_LIGHT_WARNING;
+        flash_count = 6;      // 闪烁3次（亮+灭=2，所以3*2=6）
+        ui_timer_seconds = 1; // 每秒切换一次亮/灭
     }
-
-    currentState = STATE_FOCUS;
-    remaining_seconds = focus_duration_sec;
-    e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
-    fan_level = 1;
+    else
+    {
+        currentState = STATE_FOCUS;
+        remaining_seconds = focus_duration_sec;
+        e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
+        fan_level = 1;
+    }
 }
 
 void start_rest_mode(void)
@@ -328,10 +429,6 @@ void update_display(void)
         e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄
         e1_tube_str_set(e1_tube_info, "PAUS");
         break;
-    case STATE_SNOOZE:
-        e1_led_rgb_set(e1_led_info, 0, 50, 50); // 青色
-        e1_tube_str_set(e1_tube_info, "Snoo");
-        break;
     case STATE_SHOW_STATS:
         e1_led_rgb_set(e1_led_info, 100, 100, 100); // 白
         sprintf(buf, "donE%02d", completed_sessions);
@@ -357,6 +454,7 @@ void handle_keypad_input(char key)
             remaining_seconds += 5 * 60;
         else if (key == '2')
         {
+            char buf[10];
             fan_level = (fan_level % 3) + 1;
             if (fan_level == 1)
                 e2_fan_speed_set(e2_fan_info, FAN_SPEED_LOW);
@@ -364,13 +462,17 @@ void handle_keypad_input(char key)
                 e2_fan_speed_set(e2_fan_info, FAN_SPEED_MEDIUM);
             if (fan_level == 3)
                 e2_fan_speed_set(e2_fan_info, FAN_SPEED_HIGH);
+
+            previousState = STATE_FOCUS;          // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY;    // 切换到临时显示状态
+            ui_timer_seconds = 2;                 // 设置显示时长为2秒
+            sprintf(buf, "FAn %d", fan_level);    // 准备要显示的内容
+            e1_tube_str_set(e1_tube_info, buf);   // 立即更新数码管
         }
         break;
     case STATE_REST:
     case STATE_LONG_REST:
-        if (key == '*')
-            start_focus_mode(); // `*`键在休息时也作为跳过键
-        if (key == '0')
+        if (key == '*' || key == '0')
             start_focus_mode(); // 跳过休息
         else if (key == '1')
             remaining_seconds += 5 * 60;
@@ -381,8 +483,6 @@ void handle_keypad_input(char key)
         if (key == '*')
         {
             currentState = STATE_FOCUS; // 恢复
-            if (s7_ir_status_get(s7_ir_info) == 1)
-                pir_absence_counter = 0; // 如果人已在，重置PIR
         }
         break;
     case STATE_IDLE:
@@ -404,3 +504,4 @@ void handle_keypad_input(char key)
         break;
     }
 }
+
