@@ -22,7 +22,7 @@
 
 // --- NFC卡片唯一ID (UID) ---
 unsigned char study_card_uid[4] = {0xFE, 0x1F, 0x7F, 0xC2};
-unsigned char deep_work_card_uid[4] = {0x5E, 0x6F, 0x7A, 0x8B};
+unsigned char deep_work_card_uid[4] = {0xB3, 0x35, 0x5E, 0xAC};
 unsigned char data_card_uid[4] = {0x9C, 0xAD, 0xBE, 0xCF};
 
 // --- 设置菜单相关的全局变量 ---
@@ -485,6 +485,11 @@ void update_state_machine(void)
             currentState = STATE_BIND_MENU_PROMPT;  // 成功后返回绑定菜单，等待选择下一个
         }
         break;
+    case STATE_BIND_MENU_PROMPT: // 如果在绑定菜单超时未选择
+        if (ui_timer_seconds <= 0) {
+            currentState = STATE_IDLE;
+        }
+        break;
     case STATE_BIND_FAILED:
         if (ui_timer_seconds <= 0)
         {
@@ -661,6 +666,10 @@ void update_display(void)
         e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色
         e1_tube_str_set(e1_tube_info, "Fail");
         break;
+    case STATE_TEMP_DISPLAY:
+        // 数码管内容已由 handle_keypad_input 或其他调用者设置，此处不覆盖
+        e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄色表示临时显示
+        break;
     case STATE_SET_MENU_MAIN:
         e1_led_rgb_set(e1_led_info, 50, 0, 100); // 紫色
         // 显示当前菜单项名称而不是编号
@@ -719,6 +728,24 @@ void handle_keypad_input(char key)
             ui_timer_seconds = 2;               // 设置显示时长为2秒
             sprintf(buf, "FAn %d", fan_level);  // 准备要显示的内容
             e1_tube_str_set(e1_tube_info, buf); // 立即更新数码管
+        }else if (key == '9') // 开发者功能：跳过当前阶段
+        {
+            previousState = currentState; // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY; // 临时显示 "SKIP"
+            e1_tube_str_set(e1_tube_info, "SKIP");
+            ui_timer_seconds = 1; // 显示1秒
+            remaining_seconds = 0; // 强制结束当前阶段
+        }
+        else if (key == '8') // 开发者功能：加速当前阶段
+        {
+            previousState = currentState; // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY; // 临时显示 "FAST"
+            e1_tube_str_set(e1_tube_info, "FAST");
+            ui_timer_seconds = 1; // 显示1秒
+            if (remaining_seconds > 5) // 如果剩余时间大于5秒，则设置为5秒
+            {
+                remaining_seconds = 5;
+            }
         }
         break;
     case STATE_REST:
@@ -729,6 +756,25 @@ void handle_keypad_input(char key)
             remaining_seconds += 5 * 60;
         else if (key == '#')
             currentState = STATE_IDLE;
+        else if (key == '9') // 开发者功能：跳过当前阶段
+        {
+            previousState = currentState; // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY; // 临时显示 "SKIP"
+            e1_tube_str_set(e1_tube_info, "SKIP");
+            ui_timer_seconds = 1; // 显示1秒
+            remaining_seconds = 0; // 强制结束当前阶段
+        }
+        else if (key == '8') // 开发者功能：加速当前阶段
+        {
+            previousState = currentState; // 保存当前状态
+            currentState = STATE_TEMP_DISPLAY; // 临时显示 "FAST"
+            e1_tube_str_set(e1_tube_info, "FAST");
+            ui_timer_seconds = 1; // 显示1秒
+            if (remaining_seconds > 5) // 如果剩余时间大于5秒，则设置为5秒
+            {
+                remaining_seconds = 5;
+            }
+        }
         break;
     case STATE_PAUSED:
         if (key == '*')
@@ -843,13 +889,13 @@ void handle_keypad_input(char key)
                 valid_input = (new_value <= 180);
                 break;
             case SETTING_REST_TIME:
-                valid_input = (new_value <= 30);
-                break;
-            case SETTING_LONG_REST_TIME:
                 valid_input = (new_value <= 60);
                 break;
+            case SETTING_LONG_REST_TIME:
+                valid_input = (new_value <= 120);
+                break;
             case SETTING_LOW_LIGHT_THRESHOLD:
-                valid_input = (new_value <= 999);
+                valid_input = (new_value <= 500);
                 break;
             default:
                 valid_input = false;

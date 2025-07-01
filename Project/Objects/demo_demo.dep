@@ -1664,7 +1664,7 @@ I (C:\Keil_v5\ARM\ARMCC\include\stdlib.h)(0x60252374)
 I (..\Peripherals\inc\gd32f4xx_exmc.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_ipa.h)(0x63E0A756)
 I (..\Peripherals\inc\gd32f4xx_tli.h)(0x63E0A758)
-F (..\Application\src\main.c)(0x68634FF8)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\main.o --omf_browse .\objects\main.crf --depend .\objects\main.d)
+F (..\Application\src\main.c)(0x686394CE)(--c99 -c --cpu Cortex-M4.fp.sp -D__MICROLIB -g -O0 --apcs=interwork --split_sections -I ..\CMSIS\core\inc -I ..\CMSIS\gd32f4xx\inc -I ..\Peripherals\inc -I ..\BSP\inc -I ..\Application\inc-IC:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include-D__UVISION_VERSION="536" -DGD32F450-o .\objects\main.o --omf_browse .\objects\main.crf --depend .\objects\main.d)
 I (C:\Keil_v5\ARM\ARMCC\include\stdio.h)(0x60252374)
 I (C:\Keil_v5\ARM\ARMCC\include\string.h)(0x6025237E)
 I (C:\Keil_v5\ARM\ARMCC\include\math.h)(0x60252378)
