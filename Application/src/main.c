@@ -18,34 +18,66 @@
 #define FAN_SPEED_MEDIUM 40
 #define FAN_SPEED_HIGH 60
 #define TAP_THRESHOLD_G 1.5f
-#define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
+// #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
 
 // --- NFC卡片唯一ID (UID) ---
 unsigned char study_card_uid[4] = {0xFE, 0x1F, 0x7F, 0xC2};
 unsigned char deep_work_card_uid[4] = {0x5E, 0x6F, 0x7A, 0x8B};
 unsigned char data_card_uid[4] = {0x9C, 0xAD, 0xBE, 0xCF};
 
+// --- 设置菜单相关的全局变量 ---
+// 用于在编辑模式下暂存用户输入的数值
+volatile int editing_value = 0;
+// 用于记录当前正在编辑的是哪个设置项
+typedef enum
+{
+    SETTING_NONE,
+    SETTING_FOCUS_TIME,
+    SETTING_REST_TIME,
+    SETTING_LONG_REST_TIME,
+    SETTING_LOW_LIGHT_THRESHOLD
+} SettingType;
+volatile SettingType current_setting_type = SETTING_NONE;
+// 菜单项索引，用于在主设置菜单中滚动显示或选择
+volatile int setting_menu_index = 0; // 0: SetFocusTime, 1: SetRestTime, ...
+const char *setting_menu_items[] = {
+    "FcsT", // Focus Time
+    "RstT", // Rest Time
+    "LgRT", // Long Rest Time
+    "L_Lt", // Low Light Threshold
+};
+#define NUM_SETTING_ITEMS (sizeof(setting_menu_items) / sizeof(setting_menu_items[0]))
+
 // ================== 系统状态枚举 ==================
 typedef enum
 {
-    STATE_IDLE,
-    STATE_LOADING_MODE,
-    STATE_FOCUS,
-    STATE_REST,
-    STATE_LONG_REST,
-    STATE_PAUSED,
-    STATE_SHOW_STATS,
-    STATE_TEMP_DISPLAY,
-    STATE_NFC_READ,
-    STATE_NFC_DISPLAY_PART1, // 用于显示NFC ID的前半部分
-    STATE_NFC_DISPLAY_PART2, // 用于显示NFC ID的后半部分
-    STATE_LOW_LIGHT_WARNING, // 用于低光照闪烁警告
-    STATE_BIND_MENU_PROMPT,  // 提示用户选择要绑定的卡类型 (1: Study, 2: Deep, 3: Data)
-    STATE_BINDING_STUDY,     // 等待绑定“学习卡”
-    STATE_BINDING_DEEP_WORK, // 等待绑定“深度工作卡”
-    STATE_BINDING_DATA,      // 等待绑定“数据卡”
-    STATE_BIND_SUCCESS,      // 绑定成功提示
-    STATE_BIND_FAILED,       // 绑定失败/超时提示
+    STATE_IDLE,                // 空闲状态
+    STATE_LOADING_MODE,        // 加载状态
+    STATE_FOCUS,               // 专注状态
+    STATE_REST,                // 休息状态
+    STATE_LONG_REST,           // 长休息状态
+    STATE_PAUSED,              // 暂停状态
+    STATE_SHOW_STATS,          // 显示统计数据
+    STATE_TEMP_DISPLAY,        // 临时显示
+    STATE_NFC_READ,            // 读取NFC卡片
+    STATE_NFC_DISPLAY_PART1,   // 用于显示NFC ID的前半部分
+    STATE_NFC_DISPLAY_PART2,   // 用于显示NFC ID的后半部分
+    STATE_LOW_LIGHT_WARNING,   // 用于低光照闪烁警告
+    STATE_BIND_MENU_PROMPT,    // 提示用户选择要绑定的卡类型 (1: Study, 2: Deep, 3: Data)
+    STATE_BINDING_STUDY,       // 等待绑定“学习卡”
+    STATE_BINDING_DEEP_WORK,   // 等待绑定“深度工作卡”
+    STATE_BINDING_DATA,        // 等待绑定“数据卡”
+    STATE_BIND_SUCCESS,        // 绑定成功提示
+    STATE_BIND_FAILED,         // 绑定失败/超时提示
+    STATE_SET_MENU_MAIN,       // 设置主菜单 (例如: "Set---")
+    STATE_SET_FOCUS_TIME,      // 设置专注时长 ("FcsT")
+    STATE_SET_REST_TIME,       // 设置休息时长 ("RstT")
+    STATE_SET_LONG_REST_TIME,  // 设置长休息时长 ("Lgst")
+    STATE_SET_LOW_LIGHT_THRES, // 设置低光照阈值 ("L_Lt")
+    STATE_SET_FAN_SPEEDS,      // 设置风扇档位 ("FAnS") - 可选，较复杂
+    STATE_SET_EDITING_VALUE,   // 编辑当前设置项的值
+    STATE_SET_SAVE_SUCCESS,    // 设置保存成功提示
+    STATE_SET_SAVE_FAILED,     // 设置保存失败提示
 } SystemState;
 
 // 状态与计时器
@@ -58,23 +90,17 @@ volatile int tap_cooldown_ticks = 0; // 用于敲击检测的冷却计时器
 volatile SystemState previousState = STATE_IDLE;
 
 // 定时器配置
-int focus_duration_sec = 25 * 60;
-int rest_duration_sec = 5 * 60;
-int long_rest_duration_sec = 15 * 60;
+volatile int focus_duration_sec = 25 * 60;
+volatile int rest_duration_sec = 5 * 60;
+volatile int long_rest_duration_sec = 15 * 60;
 
-// 统计与逻辑
+// 统计，逻辑与其他
 int completed_sessions = 0;
 int pomodoro_cycle_count = 0;
 int fan_level = 1;
 char last_key_pressed = 0;
 unsigned char last_read_card_id[4] = {0};
-
-// 用于滚动显示的全局变量
-char g_scroll_text[40];          // 存储需要滚动的完整文本
-int g_scroll_index = 0;          // 当前滚动显示的位置
-bool g_is_scrolling = false;     // 滚动是否激活
-volatile int g_scroll_timer = 0; // 用于控制滚动速度的计时器 (在ISR中递减)
-#define SCROLL_SPEED_TICKS 3     // 每隔3个主循环周期滚动一次 (约300ms)
+volatile unsigned int low_light_threshold = 150; // 定义光照阈值 (单位: Lux)
 
 // ================== 函数声明 ==================
 void hardware_init(void);
@@ -88,6 +114,8 @@ void update_display(void);
 void handle_keypad_input(char key);
 void start_scrolling(const char *text);
 void stop_scrolling();
+bool apply_setting(void);
+void enter_setting_edit_mode(SettingType type, int initial_value);
 
 // ================== 重写的硬件定时器代码 ==================
 void hz_timer_init(void)
@@ -168,6 +196,101 @@ void hardware_init(void)
 
     e1_led_rgb_set(e1_led_info, 0, 0, 0);
     e2_fan_speed_set(e2_fan_info, 0);
+}
+
+void enter_setting_edit_mode(SettingType type, int initial_value)
+{
+    char buf[10];
+    current_setting_type = type;
+    editing_value = 0; // 直接从0开始输入，而不是显示当前值
+    currentState = STATE_SET_EDITING_VALUE;
+
+    // 根据设置类型调整显示前缀和单位
+    switch (type)
+    {
+    case SETTING_FOCUS_TIME:
+        sprintf(buf, "FcsT%02d", editing_value); // 专注时间显示为分钟
+        break;
+    case SETTING_REST_TIME:
+        sprintf(buf, "RstT%02d", editing_value); // 休息时间显示为分钟
+        break;
+    case SETTING_LONG_REST_TIME:
+        sprintf(buf, "LgRT%02d", editing_value); // 长休息时间显示为分钟
+        break;
+    case SETTING_LOW_LIGHT_THRESHOLD:
+        sprintf(buf, "L_Lt%02d", editing_value); // 光照阈值直接显示
+        break;
+    default:
+        sprintf(buf, "ERR "); // 错误显示
+        break;
+    }
+    e1_tube_str_set(e1_tube_info, buf);
+}
+
+bool apply_setting(void)
+{
+    bool success = true;
+
+    // 检查输入值是否为0（无效输入）
+    if (editing_value == 0)
+    {
+        success = false;
+        goto cleanup;
+    }
+
+    switch (current_setting_type)
+    {
+    case SETTING_FOCUS_TIME:
+        // 设定范围：1分钟到180分钟
+        if (editing_value >= 1 && editing_value <= 180)
+        {
+            focus_duration_sec = editing_value * 60;
+        }
+        else
+        {
+            success = false;
+        }
+        break;
+    case SETTING_REST_TIME:
+        // 设定范围：1分钟到60分钟
+        if (editing_value >= 1 && editing_value <= 60)
+        {
+            rest_duration_sec = editing_value * 60;
+        }
+        else
+        {
+            success = false;
+        }
+        break;
+    case SETTING_LONG_REST_TIME:
+        // 设定范围：1分钟到120分钟
+        if (editing_value >= 1 && editing_value <= 120)
+        {
+            long_rest_duration_sec = editing_value * 60;
+        }
+        else
+        {
+            success = false;
+        }
+        break;
+    case SETTING_LOW_LIGHT_THRESHOLD:
+        // 设定范围：1到500 Lux
+        if (editing_value >= 1 && editing_value <= 500)
+        {
+            low_light_threshold = (unsigned int)editing_value;
+        }
+        else
+        {
+            success = false;
+        }
+        break;
+    default:
+        success = false; // 未知设置类型
+    }
+cleanup:
+    editing_value = 0;
+    current_setting_type = SETTING_NONE;
+    return success;
 }
 
 void handle_inputs(void)
@@ -293,6 +416,13 @@ void update_state_machine(void)
             }
         }
         break;
+    case STATE_TEMP_DISPLAY:
+        if (ui_timer_seconds <= 0)
+        {
+            // 临时显示结束，返回之前的状态
+            currentState = previousState;
+        }
+        break;
     case STATE_REST:
     case STATE_LONG_REST:
         if (remaining_seconds <= 0)
@@ -362,6 +492,15 @@ void update_state_machine(void)
             currentState = STATE_BIND_MENU_PROMPT;  // 失败后返回绑定菜单
         }
         break;
+    case STATE_SET_SAVE_SUCCESS:
+    case STATE_SET_SAVE_FAILED:
+        if (ui_timer_seconds <= 0)
+        {
+            currentState = STATE_SET_MENU_MAIN;      // 显示完毕后返回设置主菜单
+            e1_led_rgb_set(e1_led_info, 50, 0, 100); // 设置菜单紫色
+        }
+        break;
+
     default:
         break;
     }
@@ -437,7 +576,7 @@ void perform_continuous_checks(void)
 void start_focus_mode(void)
 {
     unsigned int current_illuminance = s2_illuminance_value_get(s2_illuminance_info);
-    if (current_illuminance < LOW_LIGHT_THRESHOLD)
+    if (current_illuminance < low_light_threshold)
     {
         e1_tube_str_set(e1_tube_info, "LItE Lo");
         currentState = STATE_LOW_LIGHT_WARNING;
@@ -522,11 +661,39 @@ void update_display(void)
         e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色
         e1_tube_str_set(e1_tube_info, "Fail");
         break;
+    case STATE_SET_MENU_MAIN:
+        e1_led_rgb_set(e1_led_info, 50, 0, 100); // 紫色
+        // 显示当前菜单项名称而不是编号
+        sprintf(buf, "%s", setting_menu_items[setting_menu_index]);
+        e1_tube_str_set(e1_tube_info, buf);
+        break;
+    case STATE_SET_FOCUS_TIME:
+    case STATE_SET_REST_TIME:
+    case STATE_SET_LONG_REST_TIME:
+    case STATE_SET_LOW_LIGHT_THRES:
+        // 这些状态会立即进入 STATE_SET_EDITING_VALUE，所以这里不需要特别显示
+        // 实际上，enter_setting_edit_mode 会直接设置 currentState
+        break;
+    case STATE_SET_EDITING_VALUE:
+        e1_led_rgb_set(e1_led_info, 100, 50, 0); // 橙色
+        // 显示会在handle_keypad_input中实时更新
+        break;
+    case STATE_SET_SAVE_SUCCESS:
+        e1_led_rgb_set(e1_led_info, 0, 100, 0); // 绿色
+        e1_tube_str_set(e1_tube_info, " OK ");
+        break;
+        
+    case STATE_SET_SAVE_FAILED:
+        e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色
+        e1_tube_str_set(e1_tube_info, "FAIL");
+        break;
     }
 }
 
 void handle_keypad_input(char key)
 {
+    char buf[10];
+
     switch (currentState)
     {
     case STATE_FOCUS:
@@ -582,6 +749,12 @@ void handle_keypad_input(char key)
             e1_tube_str_set(e1_tube_info, "rEAd"); // 立即更新显示，提供即时反馈
             ui_timer_seconds = 1;                  // 短暂显示
         }
+        else if (key == '6') // 按 6 进入设置主菜单
+        {
+            currentState = STATE_SET_MENU_MAIN;
+            setting_menu_index = 0;                  // 默认显示第一个菜单项
+            e1_tube_str_set(e1_tube_info, "SET---"); // 初始显示
+        }
         else if (key == '0')
         { // 按0进入绑定模式
             currentState = STATE_BIND_MENU_PROMPT;
@@ -621,6 +794,111 @@ void handle_keypad_input(char key)
         { // 强制退出当前绑定操作，返回绑定菜单
             currentState = STATE_BIND_MENU_PROMPT;
             ui_timer_seconds = 0; // 清除超时计时器
+        }
+        break;
+    case STATE_SET_MENU_MAIN:
+        if (key >= '1' && key <= '4') // 限制为有效的菜单项数量
+        {
+            int selected_index = key - '1';
+            setting_menu_index = selected_index;
+
+            // 进入对应的设置编辑状态
+            switch (selected_index)
+            {
+            case 0: // Focus Time
+                enter_setting_edit_mode(SETTING_FOCUS_TIME, focus_duration_sec / 60);
+                break;
+            case 1: // Rest Time
+                enter_setting_edit_mode(SETTING_REST_TIME, rest_duration_sec / 60);
+                break;
+            case 2: // Long Rest Time
+                enter_setting_edit_mode(SETTING_LONG_REST_TIME, long_rest_duration_sec / 60);
+                break;
+            case 3: // Low Light Threshold
+                enter_setting_edit_mode(SETTING_LOW_LIGHT_THRESHOLD, low_light_threshold);
+                break;
+            }
+        }
+        else if (key == '*') // 滚动到下一个菜单项
+        {
+            setting_menu_index = (setting_menu_index + 1) % NUM_SETTING_ITEMS;
+        }
+        else if (key == '#') // 退出设置菜单
+        {
+            currentState = STATE_IDLE;
+            setting_menu_index = 0;
+        }
+        break;
+
+    case STATE_SET_EDITING_VALUE:
+        if (key >= '0' && key <= '9')
+        {
+            int new_value = editing_value * 10 + (key - '0');
+
+            // 根据当前设置类型进行范围检查
+            bool valid_input = false;
+            switch (current_setting_type)
+            {
+            case SETTING_FOCUS_TIME:
+                valid_input = (new_value <= 180);
+                break;
+            case SETTING_REST_TIME:
+                valid_input = (new_value <= 30);
+                break;
+            case SETTING_LONG_REST_TIME:
+                valid_input = (new_value <= 60);
+                break;
+            case SETTING_LOW_LIGHT_THRESHOLD:
+                valid_input = (new_value <= 999);
+                break;
+            default:
+                valid_input = false;
+            }
+
+            if (valid_input && new_value < 1000)
+            {
+                editing_value = new_value;
+                sprintf(buf, " %03d", editing_value);
+                e1_tube_str_set(e1_tube_info, buf);
+            }
+            else
+            {
+                // 显示错误提示
+                sprintf(buf, "MAX!");
+                e1_tube_str_set(e1_tube_info, buf);
+                ui_timer_seconds = 1;
+                currentState = STATE_TEMP_DISPLAY;
+                previousState = STATE_SET_EDITING_VALUE;
+            }
+        }
+        else if (key == '*') // 确认并保存
+        {
+            if (apply_setting())
+            {
+                currentState = STATE_SET_SAVE_SUCCESS;
+                ui_timer_seconds = 2;
+            }
+            else
+            {
+                currentState = STATE_SET_SAVE_FAILED;
+                ui_timer_seconds = 2;
+            }
+        }
+        else if (key == '#') // 取消编辑
+        {
+            editing_value = 0;
+            current_setting_type = SETTING_NONE;
+            currentState = STATE_SET_MENU_MAIN;
+        }
+        break;
+
+    // SetSaveSuccess 和 SetSaveFailed 会在 update_state_machine 中处理超时
+    case STATE_SET_SAVE_SUCCESS:
+    case STATE_SET_SAVE_FAILED:
+        if (key == '#')
+        {
+            currentState = STATE_SET_MENU_MAIN;
+            ui_timer_seconds = 0;
         }
         break;
 

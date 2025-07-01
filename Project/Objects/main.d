@@ -2,6 +2,7 @@
 .\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 .\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
 .\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\math.h
+.\objects\main.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdbool.h
 .\objects\main.o: ..\BSP\inc\delay.h
 .\objects\main.o: ..\BSP\inc\u1.h
 .\objects\main.o: ..\CMSIS\gd32f4xx\inc\gd32f4xx.h

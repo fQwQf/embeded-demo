@@ -28,13 +28,14 @@ Project File Date:  06/23/2025
 *** Using Compiler 'V5.06 update 7 (build 960)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
 Build target 'demo'
 compiling main.c...
-..\Application\src\main.c(406): warning:  #1-D: last line of file ends without a newline
-  }
-..\Application\src\main.c: 1 warning, 0 errors
-linking...
-Program Size: Code=11300 RO-data=636 RW-data=120 ZI-data=1024  
-FromELF: creating hex file...
-".\Objects\demo.axf" - 0 Error(s), 1 Warning(s).
+..\Application\src\main.c(115): warning:  #1295-D: Deprecated declaration stop_scrolling - give arg types
+  void stop_scrolling();
+..\Application\src\main.c(808): error:  #20: identifier "buf" is undefined
+                  sprintf(buf, "v%03d", editing_value); // 显示当前输入值，前缀 'v' 表示 value
+..\Application\src\main.c(811): error:  #20: identifier "buf" is undefined
+                   sprintf(buf, "MAX "); // 超出最大输入值提示
+..\Application\src\main.c: 1 warning, 2 errors
+".\Objects\demo.axf" - 2 Error(s), 1 Warning(s).
 
 <h2>Software Packages used:</h2>
 
@@ -47,7 +48,8 @@ Package Vendor: GigaDevice
   C:\Users\super\AppData\Local\Arm\Packs\GigaDevice\GD32F4xx_DFP\3.2.0\Device\F4XX\Include
 
 <h2>Collection of Component Files used:</h2>
-Build Time Elapsed:  00:00:02
+Target not created.
+Build Time Elapsed:  00:00:01
 </pre>
 </body>
 </html>
