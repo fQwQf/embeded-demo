@@ -17,7 +17,7 @@
 #define FAN_SPEED_LOW 20
 #define FAN_SPEED_MEDIUM 40
 #define FAN_SPEED_HIGH 60
-#define TAP_THRESHOLD_G 1.5f
+#define TAP_THRESHOLD_G 10
 // #define LOW_LIGHT_THRESHOLD 150 // 定义光照阈值 (单位: Lux)
 
 // --- NFC卡片唯一ID (UID) ---
@@ -57,6 +57,8 @@ typedef enum
     STATE_REST,                // 休息状态
     STATE_LONG_REST,           // 长休息状态
     STATE_PAUSED,              // 暂停状态
+    STATE_AUTO_PAUSE,          // 自动暂停状态
+    STATE_MANUAL_PAUSE,        // 手动暂停状态
     STATE_SHOW_STATS,          // 显示统计数据
     STATE_TEMP_DISPLAY,        // 临时显示
     STATE_NFC_READ,            // 读取NFC卡片
@@ -486,7 +488,8 @@ void update_state_machine(void)
         }
         break;
     case STATE_BIND_MENU_PROMPT: // 如果在绑定菜单超时未选择
-        if (ui_timer_seconds <= 0) {
+        if (ui_timer_seconds <= 0)
+        {
             currentState = STATE_IDLE;
         }
         break;
@@ -520,11 +523,11 @@ void perform_continuous_checks(void)
         if (s7_ir_status_get(s7_ir_info) == 0)
         {
 
-            currentState = STATE_PAUSED;
+            currentState = STATE_AUTO_PAUSE;
             e2_fan_speed_set(e2_fan_info, 0);
         }
     }
-    else if (currentState == STATE_PAUSED)
+    else if (currentState == STATE_AUTO_PAUSE)
     {
         if (s7_ir_status_get(s7_ir_info) == 1)
         {
@@ -540,7 +543,7 @@ void perform_continuous_checks(void)
     }
 
     // 敲击检测
-    if (currentState == STATE_FOCUS || currentState == STATE_PAUSED)
+    if (currentState == STATE_FOCUS || currentState == STATE_MANUAL_PAUSE)
     {
         // 1. 更新冷却计时器
         if (tap_cooldown_ticks > 0)
@@ -560,10 +563,10 @@ void perform_continuous_checks(void)
             // 5. 根据当前状态执行操作
             if (currentState == STATE_FOCUS)
             {
-                currentState = STATE_PAUSED;
+                currentState = STATE_MANUAL_PAUSE;
                 e2_fan_speed_set(e2_fan_info, 0); // 暂停时关闭风扇
             }
-            else if (currentState == STATE_PAUSED)
+            else if (currentState == STATE_MANUAL_PAUSE)
             {
                 currentState = STATE_FOCUS;
                 // 恢复风扇，具体速度取决于fan_level
@@ -629,7 +632,8 @@ void update_display(void)
         sprintf(buf, "%02d.%02d", remaining_seconds / 60, remaining_seconds % 60);
         e1_tube_str_set(e1_tube_info, buf);
         break;
-    case STATE_PAUSED:
+    case STATE_AUTO_PAUSE:
+    case STATE_MANUAL_PAUSE:
         e1_led_rgb_set(e1_led_info, 100, 100, 0); // 黄
         e1_tube_str_set(e1_tube_info, "PAUS");
         break;
@@ -691,7 +695,7 @@ void update_display(void)
         e1_led_rgb_set(e1_led_info, 0, 100, 0); // 绿色
         e1_tube_str_set(e1_tube_info, " OK ");
         break;
-        
+
     case STATE_SET_SAVE_FAILED:
         e1_led_rgb_set(e1_led_info, 100, 0, 0); // 红色
         e1_tube_str_set(e1_tube_info, "FAIL");
@@ -707,9 +711,12 @@ void handle_keypad_input(char key)
     {
     case STATE_FOCUS:
         if (key == '*')
-            currentState = STATE_PAUSED;
+            currentState = STATE_MANUAL_PAUSE;
         else if (key == '#')
+        {
             currentState = STATE_IDLE;
+            e2_fan_speed_set(e2_fan_info, 0); // 暂停时关闭风扇
+        }
         else if (key == '1')
             remaining_seconds += 5 * 60;
         else if (key == '2')
@@ -728,20 +735,21 @@ void handle_keypad_input(char key)
             ui_timer_seconds = 2;               // 设置显示时长为2秒
             sprintf(buf, "FAn %d", fan_level);  // 准备要显示的内容
             e1_tube_str_set(e1_tube_info, buf); // 立即更新数码管
-        }else if (key == '9') // 开发者功能：跳过当前阶段
+        }
+        else if (key == '9') // 开发者功能：跳过当前阶段
         {
-            previousState = currentState; // 保存当前状态
+            previousState = currentState;      // 保存当前状态
             currentState = STATE_TEMP_DISPLAY; // 临时显示 "SKIP"
             e1_tube_str_set(e1_tube_info, "SKIP");
-            ui_timer_seconds = 1; // 显示1秒
+            ui_timer_seconds = 1;  // 显示1秒
             remaining_seconds = 0; // 强制结束当前阶段
         }
         else if (key == '8') // 开发者功能：加速当前阶段
         {
-            previousState = currentState; // 保存当前状态
+            previousState = currentState;      // 保存当前状态
             currentState = STATE_TEMP_DISPLAY; // 临时显示 "FAST"
             e1_tube_str_set(e1_tube_info, "FAST");
-            ui_timer_seconds = 1; // 显示1秒
+            ui_timer_seconds = 1;      // 显示1秒
             if (remaining_seconds > 5) // 如果剩余时间大于5秒，则设置为5秒
             {
                 remaining_seconds = 5;
@@ -758,25 +766,26 @@ void handle_keypad_input(char key)
             currentState = STATE_IDLE;
         else if (key == '9') // 开发者功能：跳过当前阶段
         {
-            previousState = currentState; // 保存当前状态
+            previousState = currentState;      // 保存当前状态
             currentState = STATE_TEMP_DISPLAY; // 临时显示 "SKIP"
             e1_tube_str_set(e1_tube_info, "SKIP");
-            ui_timer_seconds = 1; // 显示1秒
+            ui_timer_seconds = 1;  // 显示1秒
             remaining_seconds = 0; // 强制结束当前阶段
         }
         else if (key == '8') // 开发者功能：加速当前阶段
         {
-            previousState = currentState; // 保存当前状态
+            previousState = currentState;      // 保存当前状态
             currentState = STATE_TEMP_DISPLAY; // 临时显示 "FAST"
             e1_tube_str_set(e1_tube_info, "FAST");
-            ui_timer_seconds = 1; // 显示1秒
+            ui_timer_seconds = 1;      // 显示1秒
             if (remaining_seconds > 5) // 如果剩余时间大于5秒，则设置为5秒
             {
                 remaining_seconds = 5;
             }
         }
         break;
-    case STATE_PAUSED:
+    case STATE_AUTO_PAUSE:
+    case STATE_MANUAL_PAUSE:
         if (key == '*')
         {
             currentState = STATE_FOCUS; // 恢复
